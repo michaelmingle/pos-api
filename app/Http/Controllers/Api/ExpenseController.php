@@ -69,9 +69,16 @@ class ExpenseController extends Controller
             $user = Auth::user();
             $shopId = $user->shop_id;
             
-            $query = Expense::with(['category', 'creator'])
+            $query = Expense::with(['category', 'creator', 'branch'])
                 ->where('shop_id', $shopId);
-            
+
+            // Branch scope
+            if ($request->filled('branch_id') && $request->branch_id !== 'all') {
+                $query->where('branch_id', $request->branch_id);
+            } elseif (in_array($user->role, ['cashier', 'sales_person'], true) && !empty($user->branch_id)) {
+                $query->where('branch_id', $user->branch_id);
+            }
+
             // Filter by category
             if ($request->has('category') && $request->category !== 'All') {
                 $query->where('category_id', $request->category);
@@ -137,6 +144,7 @@ class ExpenseController extends Controller
             $expense = Expense::create([
                 'id' => (string) Str::uuid(),
                 'shop_id' => $user->shop_id,
+                'branch_id' => $request->input('branch_id') ?? $user->branch_id,
                 'title' => $validated['title'],
                 'description' => $validated['description'] ?? null,
                 'amount' => $validated['amount'],

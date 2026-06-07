@@ -28,7 +28,7 @@ return new class extends Migration
 
             $table->index('invoice_number');
 
-            $table->foreign('shop_id')->references('id')->on('tenants')->cascadeOnDelete();
+            $table->foreign('shop_id')->references('id')->on('shops')->cascadeOnDelete();
         });
     }
 

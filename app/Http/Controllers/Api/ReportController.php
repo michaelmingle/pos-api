@@ -24,27 +24,26 @@ class ReportController extends Controller
         try {
             $user = Auth::user();
             $shopId = $user->shop_id;
+            $branchId = $this->resolveBranchFilter($request, $user);
             $period = $request->get('period', 'monthly');
 
             $dates = $this->getDateRange($period);
 
-            // Get revenue data - make sure it's properly formatted
-            $revenueData = $this->getDashboardRevenueData($shopId, $dates);
+            $revenueData = $this->getDashboardRevenueData($shopId, $dates, $branchId);
+            $profitData = $this->getDashboardProfitData($shopId, $dates, $branchId);
 
-            // Get profit data for margin trend
-            $profitData = $this->getDashboardProfitData($shopId, $dates);
-
-            // Get top customers
             $topCustomers = Customer::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->orderBy('total_spent', 'desc')
                 ->limit(10)
                 ->get(['id', 'name', 'total_spent', 'total_orders', 'customer_type']);
 
-            // Get top products
             $topProducts = DB::table('invoice_items')
                 ->join('products', 'invoice_items.product_id', '=', 'products.id')
                 ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+                ->whereNull('invoices.deleted_at')
                 ->where('invoices.shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('invoices.branch_id', $branchId))
                 ->where('invoices.status', 'completed')
                 ->select(
                     'products.name',
@@ -57,12 +56,15 @@ class ReportController extends Controller
                 ->limit(10)
                 ->get();
 
-            // Get stock summary
-            $totalProducts = Product::where('shop_id', $shopId)->count();
+            $totalProducts = Product::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->count();
             $lowStock = Product::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereRaw('stock_quantity <= min_stock_level')
                 ->count();
             $outOfStock = Product::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->where('stock_quantity', '<=', 0)
                 ->count();
 
@@ -72,19 +74,30 @@ class ReportController extends Controller
                 ['name' => 'Out of Stock', 'value' => $totalProducts > 0 ? round(($outOfStock / $totalProducts) * 100) : 0],
             ];
 
-            // Get invoice summary
+            $invFilter = fn ($q) => $q->where('shop_id', $shopId)->when($branchId, fn ($qq) => $qq->where('branch_id', $branchId));
             $invoiceSummary = [
-                ['status' => 'paid', 'count' => Invoice::where('shop_id', $shopId)->where('payment_status', 'paid')->count(), 'amount' => Invoice::where('shop_id', $shopId)->where('payment_status', 'paid')->sum('total')],
-                ['status' => 'pending', 'count' => Invoice::where('shop_id', $shopId)->where('payment_status', 'unpaid')->count(), 'amount' => Invoice::where('shop_id', $shopId)->where('payment_status', 'unpaid')->sum('amount_due')],
-                ['status' => 'overdue', 'count' => Invoice::where('shop_id', $shopId)->where('due_date', '<', now())->where('payment_status', '!=', 'paid')->count(), 'amount' => Invoice::where('shop_id', $shopId)->where('due_date', '<', now())->where('payment_status', '!=', 'paid')->sum('amount_due')],
+                ['status' => 'paid', 'count' => Invoice::tap($invFilter)->where('payment_status', 'paid')->count(), 'amount' => Invoice::tap($invFilter)->where('payment_status', 'paid')->sum('total')],
+                ['status' => 'pending', 'count' => Invoice::tap($invFilter)->where('payment_status', 'unpaid')->count(), 'amount' => Invoice::tap($invFilter)->where('payment_status', 'unpaid')->sum('amount_due')],
+                ['status' => 'overdue', 'count' => Invoice::tap($invFilter)->where('due_date', '<', now())->where('payment_status', '!=', 'paid')->count(), 'amount' => Invoice::tap($invFilter)->where('due_date', '<', now())->where('payment_status', '!=', 'paid')->sum('amount_due')],
             ];
 
-            // Get summary
-            $totalRevenue = Payment::where('shop_id', $shopId)->where('payment_status', 'completed')->sum('amount');
-            $totalExpenses = Expense::where('shop_id', $shopId)->sum('amount');
+            $paymentBranchExists = fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId));
+
+            $totalRevenue = Payment::where('shop_id', $shopId)
+                ->where('payment_status', 'completed')
+                ->when($branchId, $paymentBranchExists)
+                ->sum('amount');
+            $totalExpenses = Expense::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->sum('amount');
             $totalProfit = $totalRevenue - $totalExpenses;
-            $totalOrders = Invoice::where('shop_id', $shopId)->where('status', 'completed')->count();
-            $totalCustomers = Customer::where('shop_id', $shopId)->count();
+            $totalOrders = Invoice::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->where('status', 'completed')
+                ->count();
+            $totalCustomers = Customer::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+                ->count();
             $averageOrderValue = $totalOrders > 0 ? $totalRevenue / $totalOrders : 0;
 
             return response()->json([
@@ -120,13 +133,15 @@ class ReportController extends Controller
     /**
      * Get dashboard revenue data (monthly)
      */
-    private function getDashboardRevenueData($shopId, $dates)
+    private function getDashboardRevenueData($shopId, $dates, $branchId = null)
     {
         try {
             // Get monthly revenue and expenses
             $data = DB::table('payments')
+                ->whereNull('deleted_at')
                 ->where('shop_id', $shopId)
                 ->where('payment_status', 'completed')
+                ->when($branchId, fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId)))
                 ->whereBetween('payment_date', [$dates['start'], $dates['end']])
                 ->select(
                     DB::raw('MONTH(payment_date) as month_num'),
@@ -140,6 +155,7 @@ class ReportController extends Controller
             // Get monthly expenses
             $expensesData = DB::table('expenses')
                 ->where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereBetween('expense_date', [$dates['start'], $dates['end']])
                 ->select(
                     DB::raw('MONTH(expense_date) as month_num'),
@@ -176,13 +192,15 @@ class ReportController extends Controller
     /**
      * Get dashboard profit data (margin trend)
      */
-    private function getDashboardProfitData($shopId, $dates)
+    private function getDashboardProfitData($shopId, $dates, $branchId = null)
     {
         try {
             // Get monthly revenue
             $revenueData = DB::table('payments')
+                ->whereNull('deleted_at')
                 ->where('shop_id', $shopId)
                 ->where('payment_status', 'completed')
+                ->when($branchId, fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId)))
                 ->whereBetween('payment_date', [$dates['start'], $dates['end']])
                 ->select(
                     DB::raw('MONTH(payment_date) as month_num'),
@@ -196,6 +214,7 @@ class ReportController extends Controller
             // Get monthly expenses
             $expensesData = DB::table('expenses')
                 ->where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereBetween('expense_date', [$dates['start'], $dates['end']])
                 ->select(
                     DB::raw('MONTH(expense_date) as month_num'),
@@ -242,51 +261,54 @@ class ReportController extends Controller
         try {
             $user = Auth::user();
             $shopId = $user->shop_id;
+            $branchId = $this->resolveBranchFilter($request, $user);
             $period = $request->get('period', 'month');
 
             // Get date range based on period
             $dateRange = $this->getAccountantDateRange($period);
 
-            // Get total revenue (completed payments)
+            $paymentBranch = fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId));
+
+            // Total revenue
             $totalRevenue = Payment::where('shop_id', $shopId)
                 ->where('payment_status', 'completed')
+                ->when($branchId, $paymentBranch)
                 ->whereBetween('payment_date', [$dateRange['start'], $dateRange['end']])
                 ->sum('amount');
 
-            // Get total expenses
+            // Total expenses
             $totalExpenses = Expense::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereBetween('expense_date', [$dateRange['start'], $dateRange['end']])
                 ->sum('amount');
 
-            // Get net profit
             $netProfit = $totalRevenue - $totalExpenses;
 
-            // Get pending invoices amount
             $pendingInvoices = Invoice::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->where('payment_status', 'unpaid')
                 ->where('status', '!=', 'cancelled')
                 ->sum('amount_due');
 
-            // Get cash on hand (cash payments in last 30 days)
             $cashOnHand = Payment::where('shop_id', $shopId)
+                ->when($branchId, $paymentBranch)
                 ->where('payment_method', 'cash')
                 ->where('payment_status', 'completed')
                 ->whereBetween('payment_date', [now()->subDays(30), now()])
                 ->sum('amount');
 
-            // Get bank balance (card + digital payments in last 30 days)
             $bankBalance = Payment::where('shop_id', $shopId)
+                ->when($branchId, $paymentBranch)
                 ->whereIn('payment_method', ['card', 'digital', 'bank_transfer'])
                 ->where('payment_status', 'completed')
                 ->whereBetween('payment_date', [now()->subDays(30), now()])
                 ->sum('amount');
 
-            // Get monthly data for chart
-            $monthlyData = $this->getMonthlyFinancialData($shopId);
+            $monthlyData = $this->getMonthlyFinancialData($shopId, $branchId);
 
-            // Calculate percentage changes
             $previousPeriodRevenue = Payment::where('shop_id', $shopId)
                 ->where('payment_status', 'completed')
+                ->when($branchId, $paymentBranch)
                 ->whereBetween('payment_date', [$dateRange['previous_start'], $dateRange['previous_end']])
                 ->sum('amount');
 
@@ -295,6 +317,7 @@ class ReportController extends Controller
                 : 0;
 
             $previousPeriodExpenses = Expense::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereBetween('expense_date', [$dateRange['previous_start'], $dateRange['previous_end']])
                 ->sum('amount');
 
@@ -378,22 +401,26 @@ class ReportController extends Controller
     /**
      * Get monthly financial data for chart
      */
-    private function getMonthlyFinancialData($shopId)
+    private function getMonthlyFinancialData($shopId, $branchId = null)
     {
         $months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         $year = now()->year;
         $data = [];
+
+        $paymentBranch = fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId));
 
         foreach ($months as $index => $month) {
             $monthNum = $index + 1;
 
             $revenue = Payment::where('shop_id', $shopId)
                 ->where('payment_status', 'completed')
+                ->when($branchId, $paymentBranch)
                 ->whereYear('payment_date', $year)
                 ->whereMonth('payment_date', $monthNum)
                 ->sum('amount');
 
             $expenses = Expense::where('shop_id', $shopId)
+                ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
                 ->whereYear('expense_date', $year)
                 ->whereMonth('expense_date', $monthNum)
                 ->sum('amount');
@@ -501,6 +528,7 @@ public function financial(Request $request)
         // Today's Cost Price (NEW)
         $todayCostPrice = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
             ->where('invoices.shop_id', $shopId)
             ->where('payments.payment_status', 'completed')
@@ -521,6 +549,7 @@ public function financial(Request $request)
         // Total Cost Price
         $totalCostPrice = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
             ->where('invoices.shop_id', $shopId)
             ->where('payments.payment_status', 'completed')
@@ -567,6 +596,7 @@ public function financial(Request $request)
         // Product Performance
         $productPerformance = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
             ->where('invoices.shop_id', $shopId)
             ->where('payments.payment_status', 'completed')
@@ -642,6 +672,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
     // Get monthly sales and cost data
     $salesQuery = DB::table('invoice_items')
         ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+        ->whereNull('invoices.deleted_at')
         ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
         ->where('invoices.shop_id', $shopId)
         ->where('payments.payment_status', 'completed')
@@ -778,6 +809,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
             foreach ($products as $product) {
                 $salesData = DB::table('invoice_items')
                     ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+                    ->whereNull('invoices.deleted_at')
                     ->leftJoin('payments', 'invoices.id', '=', 'payments.invoice_id')
                     ->where('invoices.shop_id', $shopId)
                     ->where('invoices.status', 'completed')
@@ -912,6 +944,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
     {
         $salesQuery = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
             ->where('invoices.shop_id', $shopId)
             ->where('payments.payment_status', 'completed')
@@ -947,6 +980,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
     {
         $salesQuery = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
             ->where('invoices.shop_id', $shopId)
             ->where('payments.payment_status', 'completed')
@@ -1061,6 +1095,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
     private function getProfitMarginData($shopId, $startDate, $endDate)
     {
         $data = DB::table('payments')
+            ->whereNull('deleted_at')
             ->where('shop_id', $shopId)
             ->where('payment_status', 'completed')
             ->whereBetween('payment_date', [$startDate, $endDate])
@@ -1083,6 +1118,7 @@ private function getMonthlySalesDataWithExpenses($shopId, $startDate, $endDate)
             if ($found) {
                 $costPrice = DB::table('invoice_items')
                     ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+                    ->whereNull('invoices.deleted_at')
                     ->join('payments', 'invoices.id', '=', 'payments.invoice_id')
                     ->where('invoices.shop_id', $shopId)
                     ->where('payments.payment_status', 'completed')
@@ -1164,12 +1200,14 @@ public function adminDashboard(Request $request)
         // Today's Items Sold
         $todayItemsSold = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->where('invoices.shop_id', $shopId)
             ->whereDate('invoices.created_at', $today)
             ->sum('invoice_items.quantity');
         
         $yesterdayItemsSold = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->where('invoices.shop_id', $shopId)
             ->whereDate('invoices.created_at', $yesterday)
             ->sum('invoice_items.quantity');
@@ -1250,6 +1288,7 @@ private function getHourlySalesData($shopId, $today)
         
         $sales = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->where('invoices.shop_id', $shopId)
             ->whereBetween('invoices.created_at', [$hourStart, $hourEnd])
             ->sum('invoice_items.quantity');
@@ -1295,6 +1334,7 @@ private function getTopProductsData($shopId, $today)
 {
     $topProducts = DB::table('invoice_items')
         ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+        ->whereNull('invoices.deleted_at')
         ->join('products', 'invoice_items.product_id', '=', 'products.id')
         ->where('invoices.shop_id', $shopId)
         ->whereDate('invoices.created_at', $today)
@@ -1328,7 +1368,23 @@ private function getLowStockAlerts($shopId)
         ->orderByRaw('stock_quantity / min_stock_level ASC')
         ->limit(5)
         ->get(['name', 'stock_quantity as stock', 'sku']);
-    
+
     return $lowStock;
+}
+
+/**
+ * Resolve which branch_id to filter by. Returns null when the caller wants shop-wide data.
+ * Cashiers and sales-persons assigned to a branch are server-pinned to it.
+ */
+private function resolveBranchFilter(Request $request, $user): ?string
+{
+    if (in_array($user->role, ['cashier', 'sales_person'], true) && !empty($user->branch_id)) {
+        return $user->branch_id;
+    }
+    $b = $request->input('branch_id');
+    if (!$b || $b === 'all') {
+        return null;
+    }
+    return (string) $b;
 }
 }

@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'paystack' => [
+        'public' => env('PAYSTACK_PUBLIC_KEY'),
+        'secret' => env('PAYSTACK_SECRET_KEY'),
+        'callback_url' => env('PAYSTACK_CALLBACK_URL', env('APP_URL') . '/subscription/callback'),
+        'webhook_secret' => env('PAYSTACK_WEBHOOK_SECRET', env('PAYSTACK_SECRET_KEY')),
+    ],
+
 ];

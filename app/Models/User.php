@@ -12,15 +12,11 @@ class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable;
 
-    /**
-     * IMPORTANT: Tell Laravel this model uses UUID
-     */
     public $incrementing = false;
     protected $keyType = 'string';
-    protected $primaryKey = 'id';
 
     protected $fillable = [
-        'id', 'name', 'email', 'password', 'role', 'shop_id', 'phone', 'status', 'created_by'
+        'id', 'name', 'email', 'password', 'role', 'shop_id', 'branch_id', 'phone', 'status', 'created_by'
     ];
 
     protected $hidden = [
@@ -32,9 +28,6 @@ class User extends Authenticatable
         'password' => 'hashed',
     ];
 
-    /**
-     * Auto-generate UUID for new users
-     */
     protected static function boot()
     {
         parent::boot();
@@ -51,8 +44,28 @@ class User extends Authenticatable
         return $this->belongsTo(Shop::class);
     }
 
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     public function isSuperAdmin()
     {
         return $this->role === 'super_admin';
+    }
+
+    public function hasShop()
+    {
+        return !is_null($this->shop_id);
+    }
+
+    public function scopeShopUsers($query)
+    {
+        return $query->whereNotNull('shop_id');
+    }
+
+    public function scopeSuperAdmin($query)
+    {
+        return $query->where('role', 'super_admin');
     }
 }

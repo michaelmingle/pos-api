@@ -22,7 +22,14 @@ class CustomerController extends Controller
             $shopId = $user->shop_id;
             
             $query = Customer::where('shop_id', $shopId);
-            
+
+            // Branch scoping: admins can opt into a branch (or 'all'); cashiers/sales-persons are pinned to theirs.
+            if ($request->filled('branch_id') && $request->branch_id !== 'all') {
+                $query->where('branch_id', $request->branch_id);
+            } elseif (in_array($user->role, ['cashier', 'sales_person'], true) && !empty($user->branch_id)) {
+                $query->where('branch_id', $user->branch_id);
+            }
+
             // Filter by customer type
             if ($request->has('customer_type') && $request->customer_type !== 'all') {
                 $query->where('customer_type', $request->customer_type);
@@ -76,6 +83,7 @@ class CustomerController extends Controller
             
             $validated['id'] = (string) Str::uuid();
             $validated['shop_id'] = Auth::user()->shop_id;
+            $validated['branch_id'] = $request->input('branch_id') ?? Auth::user()->branch_id;
             $validated['created_by'] = Auth::id();
             $validated['credit_limit'] = $validated['credit_limit'] ?? 0;
             $validated['total_spent'] = 0;

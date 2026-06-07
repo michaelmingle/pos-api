@@ -14,7 +14,7 @@ class Customer extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id', 'shop_id', 'name', 'email', 'phone', 'address', 'city', 'state',
+        'id', 'shop_id', 'branch_id', 'name', 'email', 'phone', 'address', 'city', 'state',
         'country', 'zip_code', 'total_spent', 'total_orders', 'credit_limit',
         'current_balance', 'birth_date', 'customer_type', 'metadata', 'created_by'
     ];
@@ -43,6 +43,11 @@ class Customer extends Model
     public function shop()
     {
         return $this->belongsTo(Shop::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function invoices()

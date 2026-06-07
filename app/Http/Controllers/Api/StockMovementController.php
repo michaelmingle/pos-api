@@ -13,9 +13,21 @@ class StockMovementController extends Controller
 {
     public function index(Request $request)
     {
+        $user = Auth::user();
         $query = StockMovement::with(['product', 'user'])
-            ->where('shop_id', Auth::user()->shop_id);
-        
+            ->where('shop_id', $user->shop_id);
+
+        // Scope movements to a branch by intersecting on the product's branch_id.
+        $branchId = null;
+        if ($request->filled('branch_id') && $request->branch_id !== 'all') {
+            $branchId = (string) $request->branch_id;
+        } elseif (in_array($user->role, ['cashier', 'sales_person'], true) && !empty($user->branch_id)) {
+            $branchId = (string) $user->branch_id;
+        }
+        if ($branchId) {
+            $query->whereHas('product', fn ($q) => $q->where('branch_id', $branchId));
+        }
+
         if ($request->has('product_id')) {
             $query->where('product_id', $request->product_id);
         }
@@ -42,16 +54,16 @@ class StockMovementController extends Controller
     {
         $validated = $request->validate([
             'product_id' => 'required|exists:products,id',
-            'type' => 'required|in:add,subtract,set',
+            'type' => 'required|in:add,subtract,set,damage',
             'quantity' => 'required|integer|min:0',
             'reason' => 'required|string',
         ]);
-        
+
         $product = Product::where('shop_id', Auth::user()->shop_id)
             ->findOrFail($validated['product_id']);
-        
+
         $oldStock = $product->stock_quantity;
-        
+
         switch ($validated['type']) {
             case 'add':
                 $newStock = $oldStock + $validated['quantity'];
@@ -68,10 +80,16 @@ class StockMovementController extends Controller
                 $movementType = 'adjustment';
                 $quantity = $newStock - $oldStock;
                 break;
+            case 'damage':
+                $newStock = max(0, $oldStock - $validated['quantity']);
+                $movementType = 'damage';
+                $quantity = -$validated['quantity'];
+                $product->damaged_quantity = ($product->damaged_quantity ?? 0) + $validated['quantity'];
+                break;
             default:
                 return response()->json(['error' => 'Invalid type'], 400);
         }
-        
+
         $product->stock_quantity = $newStock;
         $product->save();
         

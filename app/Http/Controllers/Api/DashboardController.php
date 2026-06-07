@@ -14,26 +14,35 @@ class DashboardController extends Controller
 {
     public function stats(Request $request)
     {
-        $shopId = $request->user()->shop_id;
+        $user = $request->user();
+        $shopId = $user->shop_id;
         $today = now()->toDateString();
-        
+        $branchId = $this->resolveBranchFilter($request, $user);
+
+        $invoiceFilter = fn ($q) => $q->where('shop_id', $shopId)->when($branchId, fn ($qq) => $qq->where('branch_id', $branchId));
+
         $todayRevenue = Payment::where('shop_id', $shopId)
             ->whereDate('payment_date', $today)
             ->where('payment_status', 'completed')
+            ->when($branchId, fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId)))
             ->sum('amount');
-            
-        $todayTransactions = Invoice::where('shop_id', $shopId)
+
+        $todayTransactions = Invoice::tap($invoiceFilter)
             ->whereDate('created_at', $today)
             ->count();
-            
-        $totalProducts = Product::where('shop_id', $shopId)->count();
-        
-        $totalCustomers = Customer::where('shop_id', $shopId)->count();
-        
-        // Calculate percentage changes (simplified)
+
+        $totalProducts = Product::where('shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->count();
+
+        $totalCustomers = Customer::where('shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
+            ->count();
+
         $yesterdayRevenue = Payment::where('shop_id', $shopId)
             ->whereDate('payment_date', now()->subDay())
             ->where('payment_status', 'completed')
+            ->when($branchId, fn ($q) => $q->whereExists(fn ($sub) => $sub->select(DB::raw(1))->from('invoices')->whereColumn('invoices.id', 'payments.invoice_id')->whereNull('invoices.deleted_at')->where('invoices.branch_id', $branchId)))
             ->sum('amount');
             
         $revenueChange = $yesterdayRevenue > 0 
@@ -54,9 +63,12 @@ class DashboardController extends Controller
     
     public function weeklyRevenue(Request $request)
     {
-        $shopId = $request->user()->shop_id;
-        
+        $user = $request->user();
+        $shopId = $user->shop_id;
+        $branchId = $this->resolveBranchFilter($request, $user);
+
         $weeklyData = Invoice::where('shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
             ->where('created_at', '>=', now()->subDays(7))
             ->select(
                 DB::raw('DAYNAME(created_at) as day'),
@@ -83,9 +95,12 @@ class DashboardController extends Controller
     
     public function hourlySales(Request $request)
     {
-        $shopId = $request->user()->shop_id;
-        
+        $user = $request->user();
+        $shopId = $user->shop_id;
+        $branchId = $this->resolveBranchFilter($request, $user);
+
         $hourlyData = Invoice::where('shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
             ->whereDate('created_at', now()->toDateString())
             ->select(
                 DB::raw('HOUR(created_at) as hour'),
@@ -111,12 +126,16 @@ class DashboardController extends Controller
     
     public function topProducts(Request $request)
     {
-        $shopId = $request->user()->shop_id;
-        
+        $user = $request->user();
+        $shopId = $user->shop_id;
+        $branchId = $this->resolveBranchFilter($request, $user);
+
         $topProducts = DB::table('invoice_items')
             ->join('invoices', 'invoice_items.invoice_id', '=', 'invoices.id')
+            ->whereNull('invoices.deleted_at')
             ->join('products', 'invoice_items.product_id', '=', 'products.id')
             ->where('invoices.shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('invoices.branch_id', $branchId))
             ->whereDate('invoices.created_at', now()->toDateString())
             ->select(
                 'products.name',
@@ -133,15 +152,34 @@ class DashboardController extends Controller
     
     public function lowStock(Request $request)
     {
-        $shopId = $request->user()->shop_id;
-        
+        $user = $request->user();
+        $shopId = $user->shop_id;
+        $branchId = $this->resolveBranchFilter($request, $user);
+
         $lowStockProducts = Product::where('shop_id', $shopId)
+            ->when($branchId, fn ($q) => $q->where('branch_id', $branchId))
             ->whereRaw('stock_quantity <= min_stock_level')
             ->where('status', 'active')
             ->select('name', 'stock_quantity as stock', 'sku')
             ->limit(10)
             ->get();
-            
+
         return response()->json($lowStockProducts);
+    }
+
+    /**
+     * Resolve which branch_id to filter by. Returns null if the caller wants shop-wide data.
+     * Cashiers and sales-persons are pinned to their assigned branch when they have one.
+     */
+    private function resolveBranchFilter(Request $request, $user): ?string
+    {
+        if (in_array($user->role, ['cashier', 'sales_person'], true) && !empty($user->branch_id)) {
+            return $user->branch_id;
+        }
+        $b = $request->input('branch_id');
+        if (!$b || $b === 'all') {
+            return null;
+        }
+        return (string) $b;
     }
 }

@@ -28,6 +28,7 @@ class Product extends Model
     protected $fillable = [
         'id',
         'shop_id',
+        'branch_id',
         'category_id',
         'name',
         'slug',
@@ -38,6 +39,8 @@ class Product extends Model
         'selling_price',
         'tax_rate',
         'stock_quantity',
+        'expiry_date',
+        'damaged_quantity',
         'min_stock_level',
         'max_stock_level',
         'unit',
@@ -56,10 +59,13 @@ class Product extends Model
     'cost_price' => 'decimal:2',
     'tax_rate' => 'decimal:2',
     'stock_quantity' => 'integer',
+    'damaged_quantity' => 'integer',
+    'expiry_date' => 'date',
     'min_stock_level' => 'integer',
     'max_stock_level' => 'integer',
     'created_at' => 'datetime',
     'updated_at' => 'datetime',
+    'images' => 'array',
 ];
     
     /**
@@ -102,7 +108,12 @@ class Product extends Model
     {
         return $this->belongsTo(Shop::class);
     }
-    
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
+    }
+
     /**
      * Get the category that owns the product.
      */
@@ -167,7 +178,26 @@ class Product extends Model
     {
         return $query->where('stock_quantity', '<=', 0);
     }
-    
+
+    public function scopeExpiringWithin($query, int $days)
+    {
+        $today = now()->toDateString();
+        $threshold = now()->addDays($days)->toDateString();
+        return $query->whereNotNull('expiry_date')
+            ->whereBetween('expiry_date', [$today, $threshold]);
+    }
+
+    public function scopeExpired($query)
+    {
+        return $query->whereNotNull('expiry_date')
+            ->where('expiry_date', '<', now()->toDateString());
+    }
+
+    public function scopeHasDamaged($query)
+    {
+        return $query->where('damaged_quantity', '>', 0);
+    }
+
     /**
      * Scope a query to search products.
      */

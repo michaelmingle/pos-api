@@ -14,8 +14,9 @@ class Expense extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id',               // Add this
+        'id',
         'shop_id',
+        'branch_id',
         'category_id',
         'title',
         'description',
@@ -52,6 +53,11 @@ class Expense extends Model
     public function shop()
     {
         return $this->belongsTo(Shop::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function category()

@@ -20,5 +20,6 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function ($middleware) {
     $middleware->alias([
         'tenant' => \App\Http\Middleware\TenantMiddleware::class,
+        'superadmin' => \App\Http\Middleware\SuperAdminMiddleware::class,
     ]);
 })->create();

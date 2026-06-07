@@ -13,16 +13,17 @@ class Shop extends Model
 
     public $incrementing = false;
     protected $keyType = 'string';
-    protected $primaryKey = 'id';
 
     protected $fillable = [
-        'id', 'name', 'slug', 'email', 'phone', 'address', 'city', 'state',
+        'id', 'name', 'slug', 'email', 'phone', 'sms_sender_id', 'address', 'city', 'state',
         'country', 'zip_code', 'tax_number', 'currency', 'timezone', 'status',
-        'settings', 'created_by'
+        'store_type', 'settings', 'created_by'
     ];
 
     protected $casts = [
         'settings' => 'array',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
     protected static function boot()
@@ -41,14 +42,14 @@ class Shop extends Model
         return $this->hasMany(User::class);
     }
 
-    public function customers()
-    {
-        return $this->hasMany(Customer::class);
-    }
-
     public function products()
     {
         return $this->hasMany(Product::class);
+    }
+
+    public function customers()
+    {
+        return $this->hasMany(Customer::class);
     }
 
     public function invoices()
@@ -56,15 +57,18 @@ class Shop extends Model
         return $this->hasMany(Invoice::class);
     }
 
-    public function expenses()
+    public function branches()
     {
-        return $this->hasMany(Expense::class);
+        return $this->hasMany(Branch::class);
     }
 
-        public function stockMovements()
-        {
-            return $this->hasMany(StockMovement::class);
-        }
+    public function isSupermarket()
+    {
+        return $this->store_type === 'supermarket';
+    }
 
-    
+    public function isPharmacy()
+    {
+        return $this->store_type === 'pharmacy';
+    }
 }

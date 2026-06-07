@@ -15,123 +15,152 @@ class AuthController extends Controller
 {
     // Super Admin Login (no shop required)
     public function login(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'email' => 'required|email',
-            'password' => 'required',
-        ]);
+{
+    $validator = Validator::make($request->all(), [
+        'email' => 'required|email',
+        'password' => 'required',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        $user = User::with('shop')->where('email', $request->email)->first();
-
-        if (!$user || !Hash::check($request->password, $user->password)) {
-            throw ValidationException::withMessages([
-                'email' => ['The provided credentials are incorrect.'],
-            ]);
-        }
-
-        if ($user->status !== 'active') {
-            return response()->json(['message' => 'Your account is inactive.'], 403);
-        }
-
-        // Delete old tokens
-        $user->tokens()->delete();
-
-        // Create new token
-        $token = $user->createToken('pos-token')->plainTextToken;
-
-        $response = [
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'status' => $user->status,
-            ],
-            'token' => $token
-        ];
-
-        // Add shop info if user has a shop
-        if ($user->shop) {
-            $response['user']['shop_id'] = $user->shop->id;
-            $response['user']['shop_name'] = $user->shop->name;
-            $response['user']['storeName'] = $user->shop->name;
-        }
-
-        return response()->json($response);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
+
+    $user = User::with('shop')->where('email', $request->email)->first();
+
+    if (!$user || !Hash::check($request->password, $user->password)) {
+        throw ValidationException::withMessages([
+            'email' => ['The provided credentials are incorrect.'],
+        ]);
+    }
+
+    if ($user->status !== 'active') {
+        return response()->json(['message' => 'Your account is inactive.'], 403);
+    }
+
+    // Delete old tokens
+    $user->tokens()->delete();
+
+    // Create new token
+    $token = $user->createToken('pos-token')->plainTextToken;
+
+    $response = [
+        'user' => [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role,
+            'status' => $user->status,
+        ],
+        'token' => $token
+    ];
+
+    // Add shop info if user has a shop
+    if ($user->shop) {
+        $response['user']['shop_id'] = $user->shop->id;
+        $response['user']['shop_name'] = $user->shop->name;
+        $response['user']['storeName'] = $user->shop->name;
+        $response['user']['storeType'] = $user->shop->store_type; // Add this line
+        $response['user']['store_type'] = $user->shop->store_type; // Add this line as well for consistency
+        
+        // Also return the full shop object
+        $response['shop'] = [
+            'id' => $user->shop->id,
+            'name' => $user->shop->name,
+            'store_type' => $user->shop->store_type,
+            'email' => $user->shop->email,
+            'phone' => $user->shop->phone,
+        ];
+    }
+
+    return response()->json($response);
+}
 
     // Create Shop First, then create Shop Admin User
-    public function registerShop(Request $request)
-    {
-        $validator = Validator::make($request->all(), [
-            'shop_name' => 'required|string|max:255',
-            'shop_email' => 'required|string|email|max:255|unique:shops,email',
-            'shop_phone' => 'nullable|string',
-            'shop_address' => 'nullable|string',
-            'shop_city' => 'nullable|string',
-            'shop_state' => 'nullable|string',
-            'shop_country' => 'nullable|string',
-            'admin_name' => 'required|string|max:255',
-            'admin_email' => 'required|string|email|max:255|unique:users,email',
-            'admin_password' => 'required|string|min:6',
-            'admin_phone' => 'nullable|string',
-            'admin_role' => 'nullable|string|in:admin,cashier,sales_person,accountant',
-        ]);
+ // Create Shop First, then create Shop Admin User
+public function registerShop(Request $request)
+{
+    $validator = Validator::make($request->all(), [
+        'shop_name' => 'required|string|max:255',
+        'shop_email' => 'required|string|email|max:255|unique:shops,email',
+        'shop_phone' => 'nullable|string',
+        'shop_address' => 'nullable|string',
+        'shop_city' => 'nullable|string',
+        'shop_state' => 'nullable|string',
+        'shop_country' => 'nullable|string',
+        'store_type' => 'required|in:supermarket,pharmacy',
+        'admin_name' => 'required|string|max:255',
+        'admin_email' => 'required|string|email|max:255|unique:users,email',
+        'admin_password' => 'required|string|min:6',
+        'admin_phone' => 'nullable|string',
+        'admin_role' => 'nullable|string|in:admin,cashier,sales_person,accountant',
+    ]);
 
-        if ($validator->fails()) {
-            return response()->json(['errors' => $validator->errors()], 422);
-        }
-
-        // Step 1: Create the shop
-        $shop = Shop::create([
-            'name' => $request->shop_name,
-            'slug' => Str::slug($request->shop_name) . '-' . Str::random(6),
-            'email' => $request->shop_email,
-            'phone' => $request->shop_phone,
-            'address' => $request->shop_address,
-            'city' => $request->shop_city,
-            'state' => $request->shop_state,
-            'country' => $request->shop_country,
-            'status' => 'active',
-        ]);
-
-        // Step 2: Create the shop admin user
-        $user = User::create([
-            'name' => $request->admin_name,
-            'email' => $request->admin_email,
-            'password' => Hash::make($request->admin_password),
-            'phone' => $request->admin_phone,
-            'role' => $request->admin_role ?? 'admin',
-            'shop_id' => $shop->id,
-            'status' => 'active',
-        ]);
-
-        // Create token for the new user
-        $token = $user->createToken('pos-token')->plainTextToken;
-
-        return response()->json([
-            'message' => 'Shop and admin user created successfully',
-            'shop' => [
-                'id' => $shop->id,
-                'name' => $shop->name,
-                'email' => $shop->email,
-            ],
-            'user' => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'email' => $user->email,
-                'role' => $user->role,
-                'shop_id' => $user->shop_id,
-                'shop_name' => $shop->name,
-                'storeName' => $shop->name,
-            ],
-            'token' => $token
-        ], 201);
+    if ($validator->fails()) {
+        return response()->json(['errors' => $validator->errors()], 422);
     }
+
+    // Step 1: Create the shop
+    $shop = Shop::create([
+        'name' => $request->shop_name,
+        'slug' => Str::slug($request->shop_name) . '-' . Str::random(6),
+        'email' => $request->shop_email,
+        'phone' => $request->shop_phone,
+        'address' => $request->shop_address,
+        'city' => $request->shop_city,
+        'state' => $request->shop_state,
+        'country' => $request->shop_country,
+        'store_type' => $request->store_type, // Add store_type
+        'status' => 'active',
+    ]);
+
+    // Step 2: Create the shop admin user
+    $user = User::create([
+        'name' => $request->admin_name,
+        'email' => $request->admin_email,
+        'password' => Hash::make($request->admin_password),
+        'phone' => $request->admin_phone,
+        'role' => $request->admin_role ?? 'admin',
+        'shop_id' => $shop->id,
+        'status' => 'active',
+    ]);
+
+    // Create token for the new user
+    $token = $user->createToken('pos-token')->plainTextToken;
+
+    // Notify the platform owner that a new shop registered. Non-fatal if it fails.
+    try {
+        $ownerEmail = env('OWNER_NOTIFICATION_EMAIL');
+        if ($ownerEmail) {
+            \Illuminate\Support\Facades\Mail::to($ownerEmail)
+                ->send(new \App\Mail\NewShopRegistered($shop, $user));
+        }
+    } catch (\Throwable $e) {
+        \Illuminate\Support\Facades\Log::warning('Owner notification failed', [
+            'error' => $e->getMessage(),
+            'shop_id' => $shop->id,
+        ]);
+    }
+
+    return response()->json([
+        'message' => 'Shop and admin user created successfully',
+        'shop' => [
+            'id' => $shop->id,
+            'name' => $shop->name,
+            'email' => $shop->email,
+            'store_type' => $shop->store_type,
+        ],
+        'user' => [
+            'id' => $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'role' => $user->role,
+            'shop_id' => $user->shop_id,
+            'shop_name' => $shop->name,
+            'storeName' => $shop->name,
+        ],
+        'token' => $token
+    ], 201);
+}
 
     // Create Super Admin (only once, manually or via seeder)
     public function createSuperAdmin(Request $request)
@@ -174,6 +203,10 @@ class AuthController extends Controller
 public function addUserToShop(Request $request)
 {
     $currentUser = $request->user();
+    $shop = Shop::find($currentUser->shop_id);
+    
+    $allowedRoles = ['admin', 'cashier', 'sales_person', 'accountant'];
+    $roleRule = 'required|string|in:' . implode(',', $allowedRoles);
     
     // If user is shop admin, use their shop_id automatically
     if ($currentUser->role !== 'super_admin') {
@@ -182,10 +215,11 @@ public function addUserToShop(Request $request)
     
     $validator = Validator::make($request->all(), [
         'shop_id' => 'required|uuid|exists:shops,id',
+        'branch_id' => 'nullable|uuid|exists:branches,id',
         'name' => 'required|string|max:255',
         'email' => 'required|string|email|max:255|unique:users,email',
         'password' => 'required|string|min:6',
-        'role' => 'required|string|in:admin,cashier,sales_person,accountant',
+        'role' => $roleRule,
         'phone' => 'nullable|string',
     ]);
 
@@ -195,9 +229,30 @@ public function addUserToShop(Request $request)
 
     $shop = Shop::findOrFail($request->shop_id);
 
-    // Check if current user is authorized
     if ($currentUser->role !== 'super_admin' && $currentUser->shop_id !== $request->shop_id) {
         return response()->json(['message' => 'Unauthorized to add users to this shop'], 403);
+    }
+
+    // Plan limit (super_admin bypasses)
+    if ($currentUser->role !== 'super_admin') {
+        $limits = app(\App\Services\SubscriptionLimits::class);
+        if (!$limits->canCreate($request->shop_id, 'users')) {
+            $limit = $limits->limitFor($request->shop_id, 'users');
+            return response()->json([
+                'success' => false,
+                'code' => 'PLAN_LIMIT_REACHED',
+                'resource' => 'users',
+                'limit' => $limit,
+                'message' => "Your plan allows up to {$limit} user(s). Upgrade to add more.",
+            ], 402);
+        }
+    }
+
+    if ($request->filled('branch_id')) {
+        $branch = \App\Models\Branch::find($request->branch_id);
+        if (!$branch || $branch->shop_id !== $request->shop_id) {
+            return response()->json(['message' => 'Branch does not belong to this shop'], 422);
+        }
     }
 
     $user = User::create([
@@ -208,6 +263,7 @@ public function addUserToShop(Request $request)
         'phone' => $request->phone,
         'role' => $request->role,
         'shop_id' => $request->shop_id,
+        'branch_id' => $request->branch_id,
         'status' => 'active',
         'created_by' => $currentUser->id,
     ]);
@@ -231,6 +287,7 @@ public function addUserToShop(Request $request)
         ]
     ], 201);
 }
+
 
     // Get all shops (Super Admin only)
     public function getAllShops(Request $request)
@@ -268,20 +325,30 @@ public function addUserToShop(Request $request)
 
     public function me(Request $request)
     {
-        $user = $request->user()->load('shop');
-        
+        $user = $request->user()->load(['shop', 'branch']);
+
         $response = [
             'id' => $user->id,
             'name' => $user->name,
             'email' => $user->email,
             'role' => $user->role,
             'status' => $user->status,
+            'branch_id' => $user->branch_id,
         ];
 
         if ($user->shop) {
             $response['shop_id'] = $user->shop->id;
             $response['shop_name'] = $user->shop->name;
             $response['storeName'] = $user->shop->name;
+            $response['store_type'] = $user->shop->store_type;
+        }
+
+        if ($user->branch) {
+            $response['branch'] = [
+                'id' => $user->branch->id,
+                'name' => $user->branch->name,
+                'is_main' => (bool) $user->branch->is_main,
+            ];
         }
 
         return response()->json($response);
@@ -297,19 +364,23 @@ public function addUserToShop(Request $request)
             
             // Super admin can see all users across shops
             if ($currentUser->role === 'super_admin') {
-                $query = User::with('shop');
+                $query = User::with(['shop', 'branch']);
             } else {
-                $query = User::where('shop_id', $currentUser->shop_id);
+                $query = User::where('shop_id', $currentUser->shop_id)->with('branch');
             }
-            
+
             // Filter by role
             if ($request->has('role') && $request->role !== 'all') {
                 $query->where('role', $request->role);
             }
-            
+
             // Filter by status
             if ($request->has('status') && $request->status !== 'all') {
                 $query->where('status', $request->status);
+            }
+
+            if ($request->filled('branch_id') && $request->branch_id !== 'all') {
+                $query->where('branch_id', $request->branch_id);
             }
             
             // Search
@@ -416,13 +487,21 @@ public function addUserToShop(Request $request)
                 'phone' => 'nullable|string|max:50',
                 'role' => 'sometimes|in:admin,cashier,sales_person,accountant',
                 'status' => 'sometimes|in:active,inactive',
+                'branch_id' => 'sometimes|nullable|uuid|exists:branches,id',
             ]);
-            
+
             if ($validator->fails()) {
                 return response()->json(['errors' => $validator->errors()], 422);
             }
-            
-            $updateData = $request->only(['name', 'email', 'phone', 'role', 'status']);
+
+            if ($request->filled('branch_id')) {
+                $branch = \App\Models\Branch::find($request->branch_id);
+                if (!$branch || $branch->shop_id !== $user->shop_id) {
+                    return response()->json(['message' => 'Branch does not belong to this shop'], 422);
+                }
+            }
+
+            $updateData = $request->only(['name', 'email', 'phone', 'role', 'status', 'branch_id']);
             
             if ($request->filled('password')) {
                 $updateData['password'] = Hash::make($request->password);

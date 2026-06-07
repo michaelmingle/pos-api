@@ -14,10 +14,10 @@ class Invoice extends Model
     protected $keyType = 'string';
 
     protected $fillable = [
-        'id', 'shop_id', 'customer_id', 'user_id', 'invoice_number', 'type',
+        'id', 'shop_id', 'branch_id', 'customer_id', 'user_id', 'invoice_number', 'type',
         'status', 'payment_status', 'subtotal', 'tax', 'discount', 'discount_type',
         'shipping_cost', 'total', 'amount_paid', 'amount_due', 'invoice_date',
-        'due_date', 'notes', 'terms', 'metadata', 'created_by'
+        'due_date', 'notes', 'terms', 'metadata','order_type', 'created_by'
     ];
 
     protected $casts = [
@@ -47,6 +47,11 @@ class Invoice extends Model
     public function shop()
     {
         return $this->belongsTo(Shop::class);
+    }
+
+    public function branch()
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function customer()

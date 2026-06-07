@@ -1,31 +1,49 @@
 <?php
 
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\API\AuthController;
-use App\Http\Controllers\API\ShopController;
-use App\Http\Controllers\API\ProductController;
-use App\Http\Controllers\API\CustomerController;
-use App\Http\Controllers\API\InvoiceController;
-use App\Http\Controllers\API\PaymentController;
-use App\Http\Controllers\API\ExpenseController;
-use App\Http\Controllers\API\DashboardController;
-use App\Http\Controllers\API\SyncController;
+use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ShopController;
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\CustomerController;
+use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\DashboardController;
+use App\Http\Controllers\Api\SyncController;
 use App\Http\Controllers\Api\CategoryController;
 use App\Http\Controllers\Api\StockMovementController;
 use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\ActiveLogController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\AuditTrailController;
+use App\Http\Controllers\Api\BranchController;
+use App\Http\Controllers\Api\ShopSettingsController;
+use App\Http\Controllers\Api\SMSController;
+use App\Http\Controllers\SuperAdmin\DashboardController as SuperAdminDashboardController;
+use App\Http\Controllers\SuperAdmin\BackupController as SuperAdminBackupController;
+use App\Http\Controllers\Api\SubscriptionController;
+use Illuminate\Http\Request;
 
 // Public routes
 Route::post('/auth/login', [AuthController::class, 'login']);
 Route::post('/auth/register', [AuthController::class, 'register']);
 
 Route::post('/auth/register-shop', [AuthController::class, 'registerShop']); // Create shop + admin
-Route::post('/auth/create-super-admin', [AuthController::class, 'createSuperAdmin']); 
+Route::post('/auth/create-super-admin', [AuthController::class, 'createSuperAdmin']);
+
+// Subscription public endpoints
+Route::get('/plans', [SubscriptionController::class, 'plans']);
+Route::post('/paystack/webhook', [SubscriptionController::class, 'webhook']);
 
 // Protected routes
 Route::middleware(['auth:sanctum'])->group(function () {
+
+Route::any('/sync/{dbName}', function ($dbName, Request $request) {
+        // This endpoint handles PouchDB replication
+        // You'll need to implement a CouchDB-compatible sync endpoint
+        // or use a package like: laravel-couchdb
+        return response()->json(['ok' => true]);
+    });
     // Auth
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::get('/auth/me', [AuthController::class, 'me']);
@@ -69,6 +87,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('products', [ProductController::class, 'index']);
     Route::post('products', [ProductController::class, 'store']);
     Route::get('products/low-stock', [ProductController::class, 'lowStock']);
+    Route::get('products/expiring', [ProductController::class, 'expiring']);
+    Route::get('products/expired', [ProductController::class, 'expired']);
+    Route::get('products/damaged', [ProductController::class, 'damaged']);
     Route::post('products/bulk-import', [ProductController::class, 'bulkImport']);
     Route::get('products/{id}', [ProductController::class, 'show']);
     Route::put('products/{id}', [ProductController::class, 'update']);
@@ -89,10 +110,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/invoices', [InvoiceController::class, 'index']);
     Route::get('/invoices/pending', [InvoiceController::class, 'pendingInvoices']);
     Route::post('/invoices', [InvoiceController::class, 'store']);
+    Route::post('invoices/create-with-payment', [InvoiceController::class, 'createWithPayment']);
     Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+    Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
+    Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
     Route::post('/invoices/{id}/pay', [InvoiceController::class, 'processPayment']);
     Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
     Route::get('/invoices/{id}/receipt', [InvoiceController::class, 'generateReceipt']);
+    Route::post('/invoices/{id}/whatsapp', [InvoiceController::class, 'sendWhatsAppReceipt']);
     
     // Payments
     Route::apiResource('payments', PaymentController::class);
@@ -127,6 +152,30 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::put('/expenses/{id}', [ExpenseController::class, 'update']);
     Route::delete('/expenses/{id}', [ExpenseController::class, 'destroy']);
     
+
+    // Shop settings
+    Route::get('/shop/settings', [ShopSettingsController::class, 'show']);
+    Route::put('/shop/settings', [ShopSettingsController::class, 'update']);
+
+    // Subscriptions
+    Route::get('/subscription', [SubscriptionController::class, 'show']);
+    Route::get('/subscription/limits', [SubscriptionController::class, 'usage']);
+    Route::post('/subscription/initialize', [SubscriptionController::class, 'initialize']);
+    Route::post('/subscription/verify', [SubscriptionController::class, 'verify']);
+    Route::post('/subscription/cancel', [SubscriptionController::class, 'cancel']);
+
+    // Branches (Multi-branch system)
+    Route::get('/branches', [BranchController::class, 'index']);
+    Route::post('/branches', [BranchController::class, 'store']);
+    Route::get('/branches/{id}', [BranchController::class, 'show']);
+    Route::put('/branches/{id}', [BranchController::class, 'update']);
+    Route::delete('/branches/{id}', [BranchController::class, 'destroy']);
+    Route::patch('/branches/{id}/status', [BranchController::class, 'updateStatus']);
+
+    Route::post('/send', [SMSController::class, 'sendSingle']);
+    Route::post('/send-bulk', [SMSController::class, 'sendBulk']);
+    Route::get('/balance/{shop_id}', [SMSController::class, 'getSmsBalance']);
+    Route::get('/history', [SMSController::class, 'getHistory']);
     
      Route::get('/active-logs', [ActiveLogController::class, 'index']);
      Route::get('/active-logs/summary', [ActiveLogController::class, 'summary']);
@@ -142,4 +191,67 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::get('/sync/download', [SyncController::class, 'download']);
     Route::post('/sync/queue', [SyncController::class, 'queue']);
     Route::get('/sync/status', [SyncController::class, 'status']);
+
+
+
+    // Add this route for serving resized product images
+Route::get('/product-image/{shopId}/{filename}', function($shopId, $filename, Request $request) {
+    $size = $request->get('size', 300);
+    $path = storage_path("app/public/products/{$shopId}/medium/{$filename}");
+    
+    // Try different size directories
+    $sizeMap = [
+        80 => 'thumb',
+        150 => 'small',
+        300 => 'medium',
+        600 => 'large',
+    ];
+    
+    $sizeName = $sizeMap[$size] ?? 'medium';
+    $path = storage_path("app/public/products/{$shopId}/{$sizeName}/{$filename}");
+    
+    if (!file_exists($path)) {
+        // Return placeholder if image not found
+        return response()->file(public_path('product-placeholder.png'));
+    }
+    
+    return response()->file($path, [
+        'Cache-Control' => 'public, max-age=86400',
+        'Content-Type' => mime_content_type($path),
+    ]);
+})->where('filename', '.*');
+
+    // Super Admin Routes
+    Route::middleware(['superadmin'])->prefix('superadmin')->group(function () {
+        // Dashboard
+         Route::get('/dashboard', [SuperAdminDashboardController::class, 'getDashboard']);
+        
+        // Shop Management
+        Route::get('/shops', [SuperAdminDashboardController::class, 'getShops']);
+        Route::post('/shops', [SuperAdminDashboardController::class, 'createShop']);
+        Route::get('/shops/{id}', [SuperAdminDashboardController::class, 'getShopDetails']);
+        Route::put('/shops/{id}', [SuperAdminDashboardController::class, 'updateShop']);
+        Route::delete('/shops/{id}', [SuperAdminDashboardController::class, 'deleteShop']);
+        
+        // User Management
+        Route::get('/super-users', [SuperAdminDashboardController::class, 'getUsers']);
+        
+        // Financial Reports
+        Route::get('/super-reports/consolidated', [SuperAdminDashboardController::class, 'getConsolidatedReports']);
+        Route::get('/super-transactions', [SuperAdminDashboardController::class, 'getGlobalTransactions']);
+    
+        
+        // User Management
+        Route::get('/users', [DashboardController::class, 'getUsers']);
+        
+        // Financial Reports
+        Route::get('/reports/consolidated', [DashboardController::class, 'getConsolidatedReports']);
+        Route::get('/transactions', [DashboardController::class, 'getGlobalTransactions']);
+
+        // Backups
+        Route::get('/backups', [SuperAdminBackupController::class, 'index']);
+        Route::post('/backups', [SuperAdminBackupController::class, 'store']);
+        Route::get('/backups/{filename}/download', [SuperAdminBackupController::class, 'download'])->where('filename', '.*');
+        Route::delete('/backups/{filename}', [SuperAdminBackupController::class, 'destroy'])->where('filename', '.*');
+    });
 });
