@@ -131,10 +131,15 @@ class ProductController extends Controller
                     
                     // Extract just the filename
                     $filename = basename($image);
-                    
-                    // Build correct URL
+
+                    // Build the URL via the app-served image route (not the
+                    // /storage symlink) — see routes/api.php + serveImage()
+                    // below for why: shared hosts like Bluehost/cPanel often
+                    // disable FollowSymLinks, which makes Apache 403 on the
+                    // symlinked public/storage path even though the file is
+                    // right there on disk.
                     if ($shopId) {
-                        $images[] = url("/storage/products/{$shopId}/{$filename}");
+                        $images[] = url("/api/product-images/{$shopId}/{$filename}");
                     } else {
                         $images[] = url("/storage/{$filename}");
                     }
@@ -162,6 +167,46 @@ class ProductController extends Controller
         return $productArray;
     }
     
+    /**
+     * Serve a product image directly through Laravel instead of relying on
+     * the public/storage symlink + Apache static-file serving.
+     *
+     * Why this exists: on shared hosting (cPanel/Bluehost and similar),
+     * Apache commonly disables FollowSymLinks for security. `storage:link`
+     * creates public/storage as a symlink to storage/app/public — with
+     * FollowSymLinks off, Apache 403s on that path even though the target
+     * file exists and is readable, because it refuses to traverse the
+     * symlink at all. Streaming the file through PHP sidesteps Apache's
+     * symlink policy entirely: this route is registered in web.php (public,
+     * no auth) and only exists to serve image bytes.
+     *
+     * Path traversal is blocked by validating the shop id looks like a UUID
+     * and resolving the final path with realpath(), then confirming it's
+     * still inside the shop's own image directory before streaming it.
+     */
+    public function serveImage(string $shopId, string $filename)
+    {
+        if (!preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $shopId)) {
+            abort(404);
+        }
+
+        $directory = storage_path("app/public/products/{$shopId}");
+        $requested = realpath($directory . DIRECTORY_SEPARATOR . basename($filename));
+
+        if (
+            $requested === false
+            || !str_starts_with($requested, realpath($directory) ?: $directory . DIRECTORY_SEPARATOR)
+            || !is_file($requested)
+        ) {
+            abort(404);
+        }
+
+        return response()->file($requested, [
+            'Cache-Control' => 'public, max-age=31536000, immutable',
+            'Access-Control-Allow-Origin' => '*',
+        ]);
+    }
+
     /**
      * Get stock status label
      */

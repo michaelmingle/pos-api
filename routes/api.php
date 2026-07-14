@@ -35,6 +35,18 @@ Route::post('/auth/create-super-admin', [AuthController::class, 'createSuperAdmi
 Route::get('/plans', [SubscriptionController::class, 'plans']);
 Route::post('/paystack/webhook', [SubscriptionController::class, 'webhook']);
 
+// Public product-image endpoint — see ProductController::serveImage() for why
+// this streams through PHP instead of relying on the public/storage symlink
+// (shared hosts often disable FollowSymLinks, which 403s the symlinked path
+// even when the underlying file is fine). Registered here (not web.php) so it
+// only goes through the lightweight `api` middleware group — no sessions/CSRF.
+Route::get('/product-images/{shopId}/{filename}', [ProductController::class, 'serveImage'])
+    ->where('filename', '.*');
+
+// Public shop-logo endpoint — same rationale as above, see ShopSettingsController::serveLogo().
+Route::get('/shop-logos/{shopId}/{filename}', [ShopSettingsController::class, 'serveLogo'])
+    ->where('filename', '.*');
+
 // Protected routes
 Route::middleware(['auth:sanctum'])->group(function () {
 
@@ -156,6 +168,7 @@ Route::any('/sync/{dbName}', function ($dbName, Request $request) {
     // Shop settings
     Route::get('/shop/settings', [ShopSettingsController::class, 'show']);
     Route::put('/shop/settings', [ShopSettingsController::class, 'update']);
+    Route::post('/shop/settings/logo', [ShopSettingsController::class, 'uploadLogo']);
 
     // Subscriptions
     Route::get('/subscription', [SubscriptionController::class, 'show']);

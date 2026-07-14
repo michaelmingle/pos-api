@@ -18,34 +18,19 @@
     RewriteCond %{REQUEST_URI} (.+)/$
     RewriteRule ^ %1 [L,R=301]
 
-    # Allow access to storage folder
-    <IfModule mod_alias.c>
-        Alias /storage /home/szpnjgmy/vendex-api.ofi-cia.com/storage/app/public
-    </IfModule>
+    # NOTE: product images are served by GET /api/product-images/{shop}/{file}
+    # (ProductController::serveImage), not through /storage + the public/storage
+    # symlink. Shared hosts (Bluehost/cPanel and similar) commonly disable
+    # FollowSymLinks, which makes Apache 403 on the symlinked path even though
+    # the file exists and is readable — streaming it through PHP sidesteps
+    # that entirely. There used to be an `Alias /storage ...` block here, but
+    # `Alias` is not a valid directive inside .htaccess (server-config/vhost
+    # only) — on hosts with strict AllowOverride checking, an invalid
+    # directive here can 500 the *entire* app, not just image requests, so it
+    # was removed rather than left as dead (and risky) weight.
 
     # Send Requests To Front Controller...
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
-</IfModule>
-
-# CORS headers for images
-<IfModule mod_headers.c>
-    <FilesMatch "\.(jpg|jpeg|png|gif|avif|webp)$">
-        Header set Access-Control-Allow-Origin "*"
-    </FilesMatch>
-</IfModule>
-<IfModule mod_expires.c>
-    ExpiresActive On
-    ExpiresByType image/jpeg "access plus 1 year"
-    ExpiresByType image/png "access plus 1 year"
-    ExpiresByType image/gif "access plus 1 year"
-    ExpiresByType image/webp "access plus 1 year"
-    ExpiresByType image/svg+xml "access plus 1 year"
-</IfModule>
-
-<IfModule mod_headers.c>
-    <FilesMatch "\.(jpg|jpeg|png|gif|webp|svg)$">
-        Header set Cache-Control "max-age=31536000, public, immutable"
-    </FilesMatch>
 </IfModule>
