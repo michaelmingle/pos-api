@@ -21,6 +21,7 @@ use App\Http\Controllers\Api\ShopSettingsController;
 use App\Http\Controllers\Api\SMSController;
 use App\Http\Controllers\SuperAdmin\DashboardController as SuperAdminDashboardController;
 use App\Http\Controllers\SuperAdmin\BackupController as SuperAdminBackupController;
+use App\Http\Controllers\SuperAdmin\SubscriptionsController as SuperAdminSubscriptionsController;
 use App\Http\Controllers\Api\SubscriptionController;
 use Illuminate\Http\Request;
 
@@ -260,6 +261,15 @@ Route::get('/product-image/{shopId}/{filename}', function($shopId, $filename, Re
         // Financial Reports
         Route::get('/reports/consolidated', [DashboardController::class, 'getConsolidatedReports']);
         Route::get('/transactions', [DashboardController::class, 'getGlobalTransactions']);
+
+        // Audit Logs (all shops — AuditTrailController::index() detects the
+        // super_admin role and drops the per-shop scope automatically)
+        Route::get('/audit-logs', [AuditTrailController::class, 'index']);
+
+        // Subscriptions (all shops)
+        Route::get('/subscriptions', [SuperAdminSubscriptionsController::class, 'index']);
+        Route::put('/shops/{id}/subscription', [SuperAdminSubscriptionsController::class, 'update']);
+        Route::post('/shops/{id}/subscription/cancel', [SuperAdminSubscriptionsController::class, 'cancel']);
 
         // Backups
         Route::get('/backups', [SuperAdminBackupController::class, 'index']);

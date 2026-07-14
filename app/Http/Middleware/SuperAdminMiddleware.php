@@ -11,7 +11,7 @@ class SuperAdminMiddleware
 {
     public function handle(Request $request, Closure $next)
     {
-        if (!Auth::check() || !Auth::user()->role === 'super_admin') {
+        if (!Auth::check() || Auth::user()->role !== 'super_admin') {
             return response()->json([
                 'success' => false,
                 'message' => 'Unauthorized. Super admin access required.'

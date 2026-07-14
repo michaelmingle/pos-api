@@ -62,6 +62,11 @@ class Shop extends Model
         return $this->hasMany(Branch::class);
     }
 
+    public function subscription()
+    {
+        return $this->hasOne(Subscription::class);
+    }
+
     public function isSupermarket()
     {
         return $this->store_type === 'supermarket';
